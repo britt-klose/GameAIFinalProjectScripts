@@ -16,7 +16,6 @@ public class mutantAI : MonoBehaviour
     public float moveSpeed = 5f;
     public MeleeWeapon weapon;
     public float rotationSpeed = 5f;
-    public float fleeDistance = 20f; // Distance from player where mutant will flee
     public float chaseDistance = 12f; // Distance from player where mutant will enter chase state
     public float RoarDistance = 18f; // Distance from player where mutant will Roar at Ellen
     public float attackDistance = 2f;// Distance from player where mutant will begin attacking player
@@ -25,16 +24,17 @@ public class mutantAI : MonoBehaviour
     public float stuckTime = 2f; // Time before resetting if the AI is stuck
     public float stopDistance= 1f; // Distance from player where mutant will stop chasing Ellen and return to idle
     public float distance;
+    public float distanceHide; // Distance from hiding location
     private int attackChoice;
     public Vector3 destPos;
-    public AudioSource roarAudio; 
-    public AudioSource punchAudio;
-    public AudioSource swipeAudio;
-    public AudioSource jumpAudio;
+    public AudioSource audioSource; 
+    public AudioClip roarClip;
+    public AudioClip swipeClip;
+    public AudioClip punchClip;
+    public AudioClip jumpClip;
 
-    // Health Damage items if time for death
-    public int damage = 10;
-    private int health= 30;
+    // Health Damage 
+    private int health;
     private Damageable damageable;
     private bool isDead = false;
 
@@ -52,10 +52,9 @@ public class mutantAI : MonoBehaviour
     {
         Idle,
         Chase,
-        Attack, // Combat logic and attacking other NPCs extra credit
+        Attack, // Combat logic 
         Roar,
         FleetoHide, // Flee to safe spot and hide in idle state
-        FleetoHide2,
         Dead 
     }
 
@@ -65,19 +64,20 @@ public class mutantAI : MonoBehaviour
     
     private void Start()
     {   weapon.SetOwner(gameObject); 
-        roarAudio = GetComponent<AudioSource>();
-        punchAudio = GetComponent<AudioSource>();
-        swipeAudio= GetComponent<AudioSource>();
-        jumpAudio= GetComponent<AudioSource>();
+        audioSource= GetComponent<AudioSource>();
         agent = GetComponent<UnityEngine.AI.NavMeshAgent>();
         agent.speed = moveSpeed;
+
         damageable = GetComponent<Damageable>();
         damageable.OnReceiveDamage.AddListener(onMutantHit);
         damageable.OnDeath.AddListener(OnDeath);
+
         lastPosition = transform.position;
         animator = GetComponent<Animator>();
+
         ellenPlayer = GameObject.FindGameObjectWithTag("Player"); 
         ellenTransform = ellenPlayer.transform;
+
         currentState= MutantState.Idle;
 
        
@@ -110,9 +110,6 @@ public class mutantAI : MonoBehaviour
                     case MutantState.FleetoHide:
                         UpdateFleeToHideState();
                         break;
-                    case MutantState.FleetoHide2:
-                        UpdateFleeToHideState2();
-                        break;
                         
                     case MutantState.Dead:
                         OnDeath();
@@ -122,6 +119,12 @@ public class mutantAI : MonoBehaviour
 
             if (health <= 0){
                 isDead = true;
+                currentState = MutantState.Dead;
+            }
+            if(health == 1){
+                animator.SetBool("isFleeing", true);
+                currentState = MutantState.FleetoHide;
+            }else if(isDead){
                 currentState = MutantState.Dead;
             }
             // Update animator parameters (Speed and IsChasing)
@@ -135,7 +138,7 @@ public class mutantAI : MonoBehaviour
             animator.SetBool("isChasing", false);
             animator.SetBool("isRoaring", false);
             animator.SetBool("isAttacking", false);
-            animator.SetBool("isPatrolling", false);
+            animator.SetBool("isFleeing", false); 
             
         if (distance <= RoarDistance && distance > chaseDistance)
         {
@@ -149,10 +152,10 @@ public class mutantAI : MonoBehaviour
      private void UpdateRoarState(){
         animator.SetBool("isRoaring", true);
         animator.SetBool("isAttacking", false);
-        animator.SetBool("isPatrolling", false);
+        animator.SetBool("isFleeing", false); 
         animator.SetBool("isChasing", false);
         animator.SetBool("isIdle", false);
-        roarAudio.Play();
+        PlayRoar();
         if (distance <= chaseDistance && distance >attackDistance)
         {
             Debug.Log("Transitioning to Chase state");
@@ -175,7 +178,7 @@ public class mutantAI : MonoBehaviour
             animator.SetBool("attackJump", false);
             animator.SetBool("attackPunch", false);
             animator.SetBool("attackSwipe", false);
-            animator.SetBool("isPatrolling", false);
+            animator.SetBool("isFleeing", false); 
             animator.SetBool("isIdle", false);
         }
         if(distance <= attackDistance && agent.hasPath)
@@ -190,10 +193,8 @@ public class mutantAI : MonoBehaviour
         }
     }
 
-
     private void UpdateAttackState(){
         animator.SetBool("isRoaring", false);
-        animator.SetBool("isPatrolling", false);
         animator.SetBool("isChasing", false);
         animator.SetBool("isIdle", false);
         System.Random randomNumber = new System.Random();
@@ -204,7 +205,7 @@ public class mutantAI : MonoBehaviour
             animator.SetBool("attackSwipe", false);
             animator.SetBool("attackJump", false);
             Debug.Log("Random attack: 0");
-            punchAudio.Play();
+            PlayPunch();
         }
         else if (attackChoice == 1)
         {
@@ -212,7 +213,7 @@ public class mutantAI : MonoBehaviour
             animator.SetBool("attackJump", false);
             animator.SetBool("attackPunch", false);
             Debug.Log("Random attack: 1");
-            swipeAudio.Play();
+            PlaySwipe();
         }
         else if (attackChoice == 2)
         {
@@ -220,7 +221,7 @@ public class mutantAI : MonoBehaviour
             animator.SetBool("attackPunch", false);
             animator.SetBool("attackSwipe", false);
             Debug.Log("Random attack: 2");
-            jumpAudio.Play();
+            PlayJump();
         } else 
             {
                 Debug.Log("No attack method was chosen");
@@ -232,25 +233,12 @@ public class mutantAI : MonoBehaviour
             Debug.Log("Transitioning back to chasing state");
             currentState = MutantState.Chase;
         }
-        else if (distance >= fleeDistance)
-        {
-            Debug.Log("Flee to safety then idle");
-            animator.SetBool("isFleeing", true);
-            if (Vector3.Distance(transform.position, hideLocation.position) > Vector3.Distance(transform.position, startLocation.position))
-            {
-               currentState = MutantState.FleetoHide; 
-            }
-            else
-            {
-                currentState = MutantState.FleetoHide2;
-            }
-            
-        }
     }
 
     private void onMutantHit()
     { 
         Debug.Log("Got hit!!!");
+        currentState = MutantState.FleetoHide;
         animator.SetBool("isFleeing", true);
     }
 
@@ -258,48 +246,48 @@ public class mutantAI : MonoBehaviour
         isDead = true;
         animator.SetTrigger("DeathTrigger");
         weapon.EndAttack();
+        Destroy(gameObject);
     }
 
-    private IEnumerator UpdateFleeToHideState()
-    {
-         animator.SetBool("IsFleeing", true); // Trigger fleeing animation
-         while (Vector3.Distance(transform.position, hideLocation.position) > stopRadius)
-         {
-            Vector3 direction = (hideLocation.position - transform.position).normalized;
-            Quaternion targetRotation = Quaternion.LookRotation(direction);
-            transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, Time.deltaTime * rotationSpeed);
-             // Move towards the target location
-            transform.position = Vector3.MoveTowards(transform.position, hideLocation.position, moveSpeed * Time.deltaTime);
-
-            yield return null;
-         }
-
-        // Once close enough, stop at the target location
-        transform.position = hideLocation.position;
-        animator.SetBool("IsFleeing", false); // Stop fleeing animation
-        currentState = MutantState.Idle; // Transition back to idle state
-        animator.SetBool("isIdle", true); // Set to idle state
+    public void UpdateFleeToHideState()
+    {   distanceHide = Vector3.Distance(transform.position, hideLocation.position);
+         if (hideLocation!=null){
+            agent.SetDestination(hideLocation.transform.position);
+            animator.SetBool("isFleeing", true); // Trigger fleeing animation 
+            animator.SetBool("isChasing", false);
+            animator.SetBool("attackJump", false);
+            animator.SetBool("attackPunch", false);
+            animator.SetBool("attackSwipe", false);
+        }
+         
+        if (distanceHide <= stopRadius && distance > chaseDistance)
+        {
+            currentState = MutantState.Idle; // Transition back to idle state
+            animator.SetBool("isIdle", true); // Set to idle state
+        }
     }
 
-    private IEnumerator UpdateFleeToHideState2()
-    {
-        animator.SetBool("IsFleeing", true); // Trigger fleeing animation
-         while (Vector3.Distance(transform.position, startLocation.position) > stopRadius)
-         {
-            Vector3 direction = (startLocation.position - transform.position).normalized;
-            Quaternion targetRotation = Quaternion.LookRotation(direction);
-            transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, Time.deltaTime * rotationSpeed);
-             // Move towards the target location
-            transform.position = Vector3.MoveTowards(transform.position, startLocation.position, moveSpeed * Time.deltaTime);
 
-            yield return null;
-         }
+    // Audio functions
 
-           // Once close enough, stop at the target location
-        transform.position = startLocation.position;
-        animator.SetBool("IsFleeing", false); // Stop fleeing animation
-        currentState = MutantState.Idle; // Transition back to idle state
-        animator.SetBool("isIdle", true); // Set to idle state
+    void PlayRoar() {
+        audioSource.clip = roarClip;
+        audioSource.Play();
+    }
+
+    void PlaySwipe() {
+        audioSource.clip = swipeClip;
+        audioSource.Play();
+    }
+
+    void PlayJump() {
+        audioSource.clip = jumpClip;
+        audioSource.Play();
+    }
+
+    void PlayPunch() {
+        audioSource.clip = punchClip;
+        audioSource.Play();
     }
 
 // Check if mutant is stuck
